@@ -1,0 +1,152 @@
+---
+import Base from '../layouts/Base.astro';
+import { INTRO, SALES } from '../data/joc';
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+---
+<Base titol="Inici">
+  <!-- Pantalla 1: el cas (si encara no hi ha agent) -->
+  <section id="briefing" class="briefing" hidden>
+    <p class="sobretitol">Sistema · {INTRO.subtitol}</p>
+    <h1 class="glitch" data-text={INTRO.titol}>{INTRO.titol}</h1>
+    <div class="terminal">
+      <div class="terminal-barra"><span></span><span></span><span></span> gamevault://save/corrupted</div>
+      <div class="terminal-cos" id="missatge-intro"></div>
+      <button class="boto boto-fantasma salta" type="button" data-salta>Salta ▸▸</button>
+    </div>
+
+    <form id="form-agent" class="form-agent" hidden>
+      <label for="nom-agent">Nom de jugador o d'equip</label>
+      <div class="fila-form">
+        <input id="nom-agent" name="agent" type="text" maxlength="28" autocomplete="off" placeholder="p. ex. NullPointer" required />
+        <button class="boto boto-principal" type="submit">START ▶</button>
+      </div>
+      <p class="ajuda">
+        Superaràs cinc nivells, un per sessió. A cada nivell primer desbloqueges el manual i després superes
+        els reptes, molts amb codi. Cada error et treu vida i les pistes costen XP.
+      </p>
+    </form>
+  </section>
+
+  <!-- Pantalla 2: mapa de la xarxa -->
+  <section id="mapa" class="mapa" hidden>
+    <p class="sobretitol">Selecció de nivell</p>
+    <h1>Tria el nivell <span class="accent">que toca</span></h1>
+    <p class="intro-mapa">
+      Els nivells s'obren en ordre. Cada nivell superat et dona un cartutx amb una lletra de la contrasenya.
+      Amb els cinc, pots enfrontar-te al BUG·0x00.
+    </p>
+
+    <ol class="nodes">
+      {SALES.map((sala) => (
+        <li>
+          <a class="node" href={`${base}/sala/${sala.id}/`} data-node={sala.id}>
+            <span class="node-icona" aria-hidden="true">{sala.icona}</span>
+            <span class="node-codi">{sala.codi}</span>
+            <span class="node-nom">{sala.nom}</span>
+            <span class="node-lloc">{sala.lloc}</span>
+            <span class="node-estat" data-estat>Bloquejat</span>
+          </a>
+        </li>
+      ))}
+      <li class="nucli-li">
+        <a class="node nucli" href={`${base}/final/`} data-node="final">
+          <span class="node-icona" aria-hidden="true">✸</span>
+          <span class="node-codi">BOSS FINAL</span>
+          <span class="node-nom">BUG·0x00</span>
+          <span class="node-lloc">Servidor de partides</span>
+          <span class="node-estat" data-estat>Bloquejat</span>
+        </a>
+      </li>
+    </ol>
+
+    <div class="accions-mapa">
+      <button id="reinicia" class="boto boto-fantasma" type="button">Nova partida</button>
+    </div>
+  </section>
+
+  <script>
+    import { INTRO } from '../data/joc';
+    import { carrega, desa, reinicia, salaDesbloquejada, totesCompletades } from '../scripts/estat';
+    import { pintaHud } from '../scripts/hud';
+    import { so } from '../scripts/so';
+    import { transmet } from '../scripts/transmissio';
+
+    const briefing = document.getElementById('briefing')!;
+    const mapa = document.getElementById('mapa')!;
+    const form = document.getElementById('form-agent') as HTMLFormElement;
+
+    function mostraMapa() {
+      const estat = carrega();
+      briefing.hidden = true;
+      mapa.hidden = false;
+      let actualMarcat = false;
+      document.querySelectorAll<HTMLAnchorElement>('[data-node]').forEach((node) => {
+        const id = node.dataset.node!;
+        const etiqueta = node.querySelector<HTMLElement>('[data-estat]')!;
+        let estatNode: 'bloquejat' | 'disponible' | 'recuperat';
+        if (id === 'final') {
+          estatNode = estat.final.completada ? 'recuperat' : totesCompletades(estat) ? 'disponible' : 'bloquejat';
+        } else {
+          const n = Number(id);
+          estatNode = estat.sales[n]?.completada ? 'recuperat' : salaDesbloquejada(estat, n) ? 'disponible' : 'bloquejat';
+        }
+        node.dataset.estatNode = estatNode;
+        if (estatNode === 'disponible' && !actualMarcat) {
+          node.classList.add('actual');
+          actualMarcat = true;
+        }
+        etiqueta.textContent =
+          estatNode === 'recuperat' ? (id === 'final' ? 'Boss derrotat' : `Superat · +${estat.sales[Number(id)]?.xp ?? estat.final.xp} XP`)
+          : estatNode === 'disponible' ? 'Jugable'
+          : 'Bloquejat';
+        if (estatNode === 'bloquejat') {
+          node.setAttribute('aria-disabled', 'true');
+          node.addEventListener('click', (e) => {
+            e.preventDefault();
+            so('error');
+            node.classList.remove('sacseja');
+            void node.offsetWidth;
+            node.classList.add('sacseja');
+          });
+        }
+      });
+      pintaHud(estat);
+    }
+
+    const estat = carrega();
+    if (estat.agent) {
+      mostraMapa();
+    } else {
+      briefing.hidden = false;
+      transmet(document.getElementById('missatge-intro')!, INTRO.transmissio, () => {
+        form.hidden = false;
+        document.getElementById('nom-agent')?.focus();
+      });
+    }
+
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const nom = (new FormData(form).get('agent') as string).trim();
+      if (!nom) return;
+      const nou = carrega();
+      nou.agent = nom;
+      desa(nou);
+      so('desbloqueig');
+      mostraMapa();
+    });
+
+    const botoReinicia = document.getElementById('reinicia') as HTMLButtonElement;
+    let confirma = false;
+    botoReinicia.addEventListener('click', () => {
+      if (!confirma) {
+        confirma = true;
+        botoReinicia.textContent = 'Segur? Es perdrà tot el progrés. Clica un altre cop';
+        botoReinicia.classList.add('perill');
+        return;
+      }
+      reinicia();
+      location.reload();
+    });
+
+  </script>
+</Base>
